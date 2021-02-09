@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using Xamarin.Essentials;
 
 namespace AmplitudeService
 {
@@ -15,9 +17,19 @@ namespace AmplitudeService
         private static readonly ConcurrentDictionary<string, Amplitude> Instances = new ConcurrentDictionary<string, Amplitude>();
 
         private readonly string _userId;
+        private readonly string _deviceId;
+
+        private static string _platform = "";
+        private static string _version = "";
+        private static string _country = "";
+        private static string _deviceModel = "";
+        private static string _deviceManufacturer = "";
+        private static string _osVersion = "";
+        private static string _language = "";
+
         private readonly Dictionary<string, object> _userProperties;
         private long _sessionStartTime = -1;
-        
+
         /// <summary>
         /// Initialize entire service with api key
         /// </summary>
@@ -25,6 +37,13 @@ namespace AmplitudeService
         public static void Initialize(string apiKey)
         {
             _apiKey = apiKey;
+            _platform = DeviceInfo.Platform.ToString();
+            _version = VersionTracking.CurrentVersion;
+            _country = RegionInfo.CurrentRegion.EnglishName;
+            _deviceModel = DeviceInfo.Model;
+            _deviceManufacturer = DeviceInfo.Manufacturer;
+            _osVersion = DeviceInfo.VersionString;
+            _language = CultureInfo.CurrentUICulture.EnglishName;
         }
 
         /// <summary>
@@ -34,19 +53,19 @@ namespace AmplitudeService
         /// <param name="storeInstance">If enabled, InstanceFor will return same instance for same user</param>
         /// <param name="userProperties">Properties that should be added to user</param>
         /// <returns>Amplitude service instance</returns>
-        public static Amplitude InstanceFor(string userId, bool storeInstance = false, Dictionary<string, object> userProperties = null)
+        public static Amplitude InstanceFor(string userId, string deviceId, bool storeInstance = false, Dictionary<string, object> userProperties = null)
         {
             if (storeInstance)
             {
-                return Instances.GetOrAdd(userId, new Amplitude(userId, userProperties));
+                return Instances.GetOrAdd(userId, new Amplitude(userId, deviceId, userProperties));
             }
 
             if (Instances.ContainsKey(userId))
             {
                 throw new Exception("Dont mix stored instances with non-stored");
             }
-            
-            return new Amplitude(userId, userProperties);
+
+            return new Amplitude(userId, deviceId, userProperties);
         }
 
         /// <summary>
@@ -55,9 +74,9 @@ namespace AmplitudeService
         /// <param name="userId">User identifier</param>
         /// <param name="userProperties">Properties that should be added to user</param>
         /// <returns>Amplitude service instance</returns>
-        public static Amplitude InstanceFor(string userId, Dictionary<string, object> userProperties)
+        public static Amplitude InstanceFor(string userId, string deviceId, Dictionary<string, object> userProperties)
         {
-            return InstanceFor(userId, false, userProperties);
+            return InstanceFor(userId, deviceId, false, userProperties);
         }
 
         /// <summary>
@@ -69,7 +88,7 @@ namespace AmplitudeService
             Instances.TryRemove(userId, out _);
         }
 
-        private Amplitude(string userId, Dictionary<string, object> userProperties = null)
+        private Amplitude(string userId, string deviceId, Dictionary<string, object> userProperties = null)
         {
             if (string.IsNullOrEmpty(_apiKey))
             {
@@ -77,8 +96,32 @@ namespace AmplitudeService
             }
 
             _userId = userId;
+            _deviceId = deviceId;
             _userProperties = userProperties;
         }
+
+        //private Amplitude(string deviceId, Dictionary<string, object> userProperties = null)
+        //{
+        //    if (string.IsNullOrEmpty(_apiKey))
+        //    {
+        //        throw new Exception("You should call Amplitude.Initialize(...) with your API_KEY first");
+        //    }
+
+        //    _deviceId = deviceId;
+        //    _userProperties = userProperties;
+        //}
+
+        //private Amplitude(string userId, string deviceId, Dictionary<string, object> userProperties = null)
+        //{
+        //    if (string.IsNullOrEmpty(_apiKey))
+        //    {
+        //        throw new Exception("You should call Amplitude.Initialize(...) with your API_KEY first");
+        //    }
+
+        //    _userId = userId;
+        //    _deviceId = deviceId;
+        //    _userProperties = userProperties;
+        //}
 
         /// <summary>
         /// Start new session to track
@@ -90,7 +133,7 @@ namespace AmplitudeService
             _sessionStartTime = startTime == default
                 ? DateTimeOffset.Now.ToUnixTimeMilliseconds()
                 : startTime.ToUnixTimeMilliseconds();
-
+            
             return this;
         }
 
@@ -102,7 +145,7 @@ namespace AmplitudeService
         /// <returns>This instance for chaining</returns>
         public Amplitude Track(string eventName, Dictionary<string, object> properties = null)
         {
-            SendEvent(_userId, eventName, properties, _userProperties, _sessionStartTime);
+            SendEvent(_userId, _deviceId, eventName, properties, _userProperties, _sessionStartTime);
             return this;
         }
 
@@ -133,7 +176,7 @@ namespace AmplitudeService
                     );
 
                 }
-                
+
                 dict.Add(key as string, value);
             }
 
@@ -142,6 +185,7 @@ namespace AmplitudeService
 
         private static void SendEvent(
             string userId,
+            string deviceId,
             string eventName,
             Dictionary<string, object> properties,
             Dictionary<string, object> userProperties,
@@ -153,6 +197,14 @@ namespace AmplitudeService
                 var eventData = new Dictionary<string, object>
                 {
                     {"user_id", userId},
+                    {"device_id", deviceId},
+                    {"app_version", _version},
+                    {"platform", _platform},
+                    {"country", _country},
+                    {"os_version", _osVersion},
+                    {"device_manufacturer", _deviceManufacturer},
+                    {"device_model", _deviceModel},
+                    {"language", _language},
                     {"insert_id", Guid.NewGuid()},
                     {"event_type", eventName},
                     {"time", DateTimeOffset.Now.ToUnixTimeMilliseconds()}
@@ -172,7 +224,7 @@ namespace AmplitudeService
                 {
                     eventData.Add("session_id", sessionStartTime);
                 }
-                
+
                 var parameters = new Dictionary<string, object>
                 {
                     {"api_key", _apiKey},
