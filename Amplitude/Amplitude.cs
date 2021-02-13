@@ -28,7 +28,7 @@ namespace AmplitudeService
         private static string _language = "";
 
         private readonly Dictionary<string, object> _userProperties;
-        private long _sessionStartTime = -1;
+        private static long _sessionStartTime = -1;
 
         /// <summary>
         /// Initialize entire service with api key
